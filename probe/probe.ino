@@ -1,0 +1,240 @@
+/*
+  Create a BLE server that, once we receive a connection, will send periodic notifications
+  of pressure, temperature and battery voltage.
+  
+  Based on Neil Kolban example for IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleNotify.cpp
+*/
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pChrVoltage = NULL;
+BLECharacteristic* pChrTemperature = NULL;
+BLECharacteristic* pChrPressure1 = NULL;
+BLECharacteristic* pChrPressure2 = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+uint32_t value = 0;
+int led = LED_BUILTIN;
+uint8_t iLoop = 0;
+uint32_t uPressure1NoLoad, uPressure2NoLoad;
+
+// See the following for generating UUIDs:
+// https://www.uuidgenerator.net/
+
+//8aaeec2c-7f43-11ee-b962-0242ac120002  service
+//8aaeee98-7f43-11ee-b962-0242ac120002  battery voltage 
+//8aaeefba-7f43-11ee-b962-0242ac120002  temp
+//8aaef0c8-7f43-11ee-b962-0242ac120002  pressure 1
+//8aaef244-7f43-11ee-b962-0242ac120002  pressure 2
+//8aaef352-7f43-11ee-b962-0242ac120002
+//8aaef44c-7f43-11ee-b962-0242ac120002
+//8aaef7f8-7f43-11ee-b962-0242ac120002
+//8aaef8ca-7f43-11ee-b962-0242ac120002
+//8aaef9a6-7f43-11ee-b962-0242ac120002
+
+#define SERVICE_UUID "8aaeec2c-7f43-11ee-b962-0242ac120002"
+#define CH_BATTERY_VOLTAGE_UUID "8aaeee98-7f43-11ee-b962-0242ac120002"
+#define CH_TEMPERATURE_UUID "8aaeefba-7f43-11ee-b962-0242ac120002"
+#define CH_PRESSURE_1_UUID "8aaef0c8-7f43-11ee-b962-0242ac120002"
+#define CH_PRESSURE_2_UUID "8aaef244-7f43-11ee-b962-0242ac120002"
+// update pressure 50 times per second
+// bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
+#define BLE_DELAY 20
+//temperature and voltage once per 2 seconds
+#define MOD_TEMP_VOLT 100
+//set VERBOSE to 1 if you want more print statements sent to the Serial port.
+#define VERBOSE 1
+//#define VERSOSE 0
+
+//Pins
+#define VBATPIN A13
+#define VPRESSURE1PIN A2
+#define VPRESSURE2PIN A3
+
+void PrintPinVolts(uint uPin, float fVolts){
+  Serial.print("Pin:");
+  Serial.print(uPin);
+  Serial.print(" ");
+  Serial.print(fVolts);
+  Serial.println(" mVolts");
+};
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+    }
+};
+
+uint32_t getAnalogData(uint uPin) {
+  float fMeasuredV = analogReadMilliVolts(uPin);
+  if (VERBOSE){PrintPinVolts(uPin,fMeasuredV);};
+  return (uint32_t(round(fMeasuredV)));
+};
+
+uint32_t getVoltage() {
+  uint32_t uVolts = getAnalogData(VBATPIN);
+  uVolts *= 2;    // we divided by 2, so multiply backfloat measuredvbat = analogReadMilliVolts(VBATPIN);
+  return (uVolts);
+};
+
+uint32_t getTemperature() {
+  //placeholder for future capabilities to get temperature.
+  return (0);
+};
+
+void initPressureNoLoads(){
+  //get Pressure Voltage at start-up, which we will assume happens at air speed of zero.
+  delay(500);
+  uPressure1NoLoad = getPressureNoLoad(VPRESSURE1PIN);
+  uPressure2NoLoad = getPressureNoLoad(VPRESSURE2PIN);
+  Serial.print("P1 NoLoad:");
+  Serial.println(uPressure1NoLoad);
+  Serial.print("P2 NoLoad:");
+  Serial.println(uPressure2NoLoad);
+};
+
+uint32_t getPressureNoLoad(uint uPin){
+  //  take average over a bit of time
+  uint32_t uSum=0;
+  int i;
+  #define POINTS 5
+  for (i = 0; i < POINTS; i++){
+    uSum += getAnalogData(uPin);
+    if(VERBOSE){Serial.println(uSum);};
+    delay(200);
+  };
+  return (uSum/POINTS);
+};
+
+
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Starting ArduAOA Probe...");
+  iLoop = 0;
+
+  //set input pins
+  pinMode(VBATPIN, INPUT);
+  pinMode(VPRESSURE1PIN, INPUT);
+  pinMode(VPRESSURE2PIN, INPUT);
+
+  // set LED to be an output pin
+  pinMode(led, OUTPUT);
+  digitalWrite(led, HIGH);
+
+  // initialize the pressure NOLOAD values
+  initPressureNoLoads();
+
+  // Create the BLE Device
+  BLEDevice::init("ArduAOA Probe");
+
+  // Create the BLE Server
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  // Create the BLE Service
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Create BLE Characteristics
+  pChrVoltage = pService->createCharacteristic(
+                      CH_BATTERY_VOLTAGE_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_NOTIFY 
+                    );
+  pChrTemperature = pService->createCharacteristic(
+                      CH_TEMPERATURE_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_NOTIFY 
+                    );
+  pChrPressure1 = pService->createCharacteristic(
+                      CH_PRESSURE_1_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_NOTIFY 
+                    );
+  pChrPressure2 = pService->createCharacteristic(
+                      CH_PRESSURE_2_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_NOTIFY 
+                    );
+
+  // Create BLE Descriptors
+  pChrVoltage->addDescriptor(new BLE2902());
+  pChrTemperature->addDescriptor(new BLE2902());
+  pChrPressure1->addDescriptor(new BLE2902());
+  pChrPressure2->addDescriptor(new BLE2902());
+
+  // Start the service
+  pService->start();
+
+  // Start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(false);
+  pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
+  BLEDevice::startAdvertising();
+  Serial.println("Waiting ArduAOA Display connection to notify...");
+  digitalWrite(led, LOW);
+}
+
+void loop() {
+    // notify changed value
+    if (deviceConnected) {
+        // collect and send pressures
+        value = getAnalogData(VPRESSURE1PIN);
+        value -= uPressure1NoLoad;
+        pChrPressure1->setValue((uint8_t*)&value, 4);
+        pChrPressure1->notify();
+
+        value = getAnalogData(VPRESSURE2PIN);
+        value -= uPressure2NoLoad;
+        pChrPressure2->setValue((uint8_t*)&value, 4);
+        pChrPressure2->notify();
+
+        // if ready, collect temperature and voltage
+        if (0 == iLoop % MOD_TEMP_VOLT) {
+          if(VERBOSE){Serial.println("Sending Battery Voltage and Temperature");};
+          value = getVoltage();
+          pChrVoltage->setValue((uint8_t*)&value, 4);
+          pChrVoltage->notify();
+          value = getTemperature();
+          pChrTemperature->setValue((uint8_t*)&value, 4);
+          pChrTemperature->notify();
+        }
+
+        delay(BLE_DELAY);
+
+        //flash LED when connected
+        if (0 == iLoop % 22){digitalWrite(led, HIGH);}
+        if (0 == iLoop % 25){digitalWrite(led, LOW);}
+    }
+    else {
+      //flash LED when not connected, will appear dimly lit
+      if (0 == iLoop % 240){digitalWrite(led, HIGH);}
+      if (0 == iLoop % 250){digitalWrite(led, LOW);}
+    }
+    // disconnecting
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500); // give the bluetooth stack the chance to get things ready
+        pServer->startAdvertising(); // restart advertising
+        Serial.println("Disconnected. Start advertising...");
+        oldDeviceConnected = deviceConnected;
+        digitalWrite(led, LOW);
+    }
+    // connecting
+    if (deviceConnected && !oldDeviceConnected) {
+        // do stuff here on connecting
+        oldDeviceConnected = deviceConnected;
+        value = 0;
+        digitalWrite(led, HIGH);
+        Serial.println("Connected. Start sending data...");
+    }
+    iLoop++;
+}
