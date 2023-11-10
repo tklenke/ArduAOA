@@ -1,2 +1,3 @@
 
 probe/.skip.esp32s2
+*.esp32s2
