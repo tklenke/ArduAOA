@@ -39,8 +39,8 @@ uint32_t uPressure1NoLoad, uPressure2NoLoad;
 #define SERVICE_UUID "8aaeec2c-7f43-11ee-b962-0242ac120002"
 #define CH_BATTERY_VOLTAGE_UUID "8aaeee98-7f43-11ee-b962-0242ac120002"
 #define CH_TEMPERATURE_UUID "8aaeefba-7f43-11ee-b962-0242ac120002"
-#define CH_PRESSURE_1_UUID "8aaef0c8-7f43-11ee-b962-0242ac120002"
-#define CH_PRESSURE_2_UUID "8aaef244-7f43-11ee-b962-0242ac120002"
+#define CH_PRESSURE_FWD_UUID "8aaef0c8-7f43-11ee-b962-0242ac120002"
+#define CH_PRESSURE_45_UUID "8aaef244-7f43-11ee-b962-0242ac120002"
 // update pressure 50 times per second
 // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
 #define BLE_DELAY 20
@@ -52,8 +52,8 @@ uint32_t uPressure1NoLoad, uPressure2NoLoad;
 
 //Pins
 #define VBATPIN A13
-#define VPRESSURE1PIN A2
-#define VPRESSURE2PIN A3
+#define VPRESSUREFWDPIN A2
+#define VPRESSURE45PIN A3
 
 void PrintPinVolts(uint uPin, float fVolts){
   Serial.print("Pin:");
@@ -93,8 +93,8 @@ uint32_t getTemperature() {
 void initPressureNoLoads(){
   //get Pressure Voltage at start-up, which we will assume happens at air speed of zero.
   delay(500);
-  uPressure1NoLoad = getPressureNoLoad(VPRESSURE1PIN);
-  uPressure2NoLoad = getPressureNoLoad(VPRESSURE2PIN);
+  uPressureFwdNoLoad = getPressureNoLoad(VPRESSUREFWDPIN);
+  uPressure45NoLoad = getPressureNoLoad(VPRESSURE45PIN);
   Serial.print("P1 NoLoad:");
   Serial.println(uPressure1NoLoad);
   Serial.print("P2 NoLoad:");
@@ -123,8 +123,8 @@ void setup() {
 
   //set input pins
   pinMode(VBATPIN, INPUT);
-  pinMode(VPRESSURE1PIN, INPUT);
-  pinMode(VPRESSURE2PIN, INPUT);
+  pinMode(VPRESSUREFWDPIN, INPUT);
+  pinMode(VPRESSURE45PIN, INPUT);
 
   // set LED to be an output pin
   pinMode(led, OUTPUT);
@@ -155,12 +155,12 @@ void setup() {
                       BLECharacteristic::PROPERTY_NOTIFY 
                     );
   pChrPressure1 = pService->createCharacteristic(
-                      CH_PRESSURE_1_UUID,
+                      CH_PRESSURE_FWD_UUID,
                       BLECharacteristic::PROPERTY_READ   |
                       BLECharacteristic::PROPERTY_NOTIFY 
                     );
   pChrPressure2 = pService->createCharacteristic(
-                      CH_PRESSURE_2_UUID,
+                      CH_PRESSURE_45_UUID,
                       BLECharacteristic::PROPERTY_READ   |
                       BLECharacteristic::PROPERTY_NOTIFY 
                     );
@@ -189,14 +189,14 @@ void loop() {
     if (deviceConnected) {
         // collect and send pressures
         value = getAnalogData(VPRESSURE1PIN);
-        value -= uPressure1NoLoad;
-        pChrPressure1->setValue((uint8_t*)&value, 4);
-        pChrPressure1->notify();
+        value -= uPressureFwdNoLoad;
+        pChrPressureFwd->setValue((uint8_t*)&value, 4);
+        pChrPressureFwd->notify();
 
         value = getAnalogData(VPRESSURE2PIN);
-        value -= uPressure2NoLoad;
-        pChrPressure2->setValue((uint8_t*)&value, 4);
-        pChrPressure2->notify();
+        value -= uPressure45NoLoad;
+        pChrPressure45->setValue((uint8_t*)&value, 4);
+        pChrPressure45->notify();
 
         // if ready, collect temperature and voltage
         if (0 == iLoop % MOD_TEMP_VOLT) {
