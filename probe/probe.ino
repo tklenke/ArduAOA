@@ -13,14 +13,15 @@
 BLEServer* pServer = NULL;
 BLECharacteristic* pChrVoltage = NULL;
 BLECharacteristic* pChrTemperature = NULL;
-BLECharacteristic* pChrPressure1 = NULL;
-BLECharacteristic* pChrPressure2 = NULL;
+BLECharacteristic* pChrPressureFwd = NULL;
+BLECharacteristic* pChrPressure45 = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 uint32_t value = 0;
 int led = LED_BUILTIN;
 uint8_t iLoop = 0;
-uint32_t uPressure1NoLoad, uPressure2NoLoad;
+uint32_t uTempCounter = 0;  //use temperature as a counter initially until actual data available
+uint32_t uPressureFwdNoLoad, uPressure45NoLoad;
 
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
@@ -28,8 +29,8 @@ uint32_t uPressure1NoLoad, uPressure2NoLoad;
 //8aaeec2c-7f43-11ee-b962-0242ac120002  service
 //8aaeee98-7f43-11ee-b962-0242ac120002  battery voltage 
 //8aaeefba-7f43-11ee-b962-0242ac120002  temp
-//8aaef0c8-7f43-11ee-b962-0242ac120002  pressure 1
-//8aaef244-7f43-11ee-b962-0242ac120002  pressure 2
+//8aaef0c8-7f43-11ee-b962-0242ac120002  pressure forward pitot probe
+//8aaef244-7f43-11ee-b962-0242ac120002  pressure 45 probe
 //8aaef352-7f43-11ee-b962-0242ac120002
 //8aaef44c-7f43-11ee-b962-0242ac120002
 //8aaef7f8-7f43-11ee-b962-0242ac120002
@@ -87,7 +88,7 @@ uint32_t getVoltage() {
 
 uint32_t getTemperature() {
   //placeholder for future capabilities to get temperature.
-  return (0);
+  return (uTempCounter++);
 };
 
 void initPressureNoLoads(){
@@ -96,9 +97,9 @@ void initPressureNoLoads(){
   uPressureFwdNoLoad = getPressureNoLoad(VPRESSUREFWDPIN);
   uPressure45NoLoad = getPressureNoLoad(VPRESSURE45PIN);
   Serial.print("P1 NoLoad:");
-  Serial.println(uPressure1NoLoad);
+  Serial.println(uPressureFwdNoLoad);
   Serial.print("P2 NoLoad:");
-  Serial.println(uPressure2NoLoad);
+  Serial.println(uPressure45NoLoad);
 };
 
 uint32_t getPressureNoLoad(uint uPin){
@@ -154,12 +155,12 @@ void setup() {
                       BLECharacteristic::PROPERTY_READ   |
                       BLECharacteristic::PROPERTY_NOTIFY 
                     );
-  pChrPressure1 = pService->createCharacteristic(
+  pChrPressureFwd = pService->createCharacteristic(
                       CH_PRESSURE_FWD_UUID,
                       BLECharacteristic::PROPERTY_READ   |
                       BLECharacteristic::PROPERTY_NOTIFY 
                     );
-  pChrPressure2 = pService->createCharacteristic(
+  pChrPressure45 = pService->createCharacteristic(
                       CH_PRESSURE_45_UUID,
                       BLECharacteristic::PROPERTY_READ   |
                       BLECharacteristic::PROPERTY_NOTIFY 
@@ -168,8 +169,8 @@ void setup() {
   // Create BLE Descriptors
   pChrVoltage->addDescriptor(new BLE2902());
   pChrTemperature->addDescriptor(new BLE2902());
-  pChrPressure1->addDescriptor(new BLE2902());
-  pChrPressure2->addDescriptor(new BLE2902());
+  pChrPressureFwd->addDescriptor(new BLE2902());
+  pChrPressure45->addDescriptor(new BLE2902());
 
   // Start the service
   pService->start();
@@ -188,12 +189,12 @@ void loop() {
     // notify changed value
     if (deviceConnected) {
         // collect and send pressures
-        value = getAnalogData(VPRESSURE1PIN);
+        value = getAnalogData(VPRESSUREFWDPIN);
         value -= uPressureFwdNoLoad;
         pChrPressureFwd->setValue((uint8_t*)&value, 4);
         pChrPressureFwd->notify();
 
-        value = getAnalogData(VPRESSURE2PIN);
+        value = getAnalogData(VPRESSURE45PIN);
         value -= uPressure45NoLoad;
         pChrPressure45->setValue((uint8_t*)&value, 4);
         pChrPressure45->notify();
