@@ -2,7 +2,8 @@
   Create a BLE server that, once we receive a connection, will send periodic notifications
   of pressure, temperature and battery voltage.
   
-  Based on Neil Kolban example for IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleNotify.cpp
+  Based on Neil Kolban example for 
+      IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleNotify.cpp
 */
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -135,7 +136,7 @@ void setup() {
   initPressureNoLoads();
 
   // Create the BLE Device
-  BLEDevice::init("ArduAOA Probe");
+  BLEDevice::init("AAoAP");
 
   // Create the BLE Server
   pServer = BLEDevice::createServer();
