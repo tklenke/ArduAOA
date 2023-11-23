@@ -3,74 +3,142 @@
   and display that data along with data from the local microcontroller on a small OLED screen and a NeoPixel 8x
   LED strip.
   
-  BLE information based on 
-  Based on Neil Kolban example for IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleNotify.cpp
 */
-/**
- * A BLE client example that is rich in capabilities.
- * There is a lot new capabilities implemented.
- * author unknown
- * updated by chegewara
- */
+
 
 #include "BLEDevice.h"
+#include <Adafruit_NeoPixel.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Fonts/FreeSans12pt7b.h>
 
 //set VERBOSE to 1 if you want more print statements sent to the Serial port.
-#define VERBOSE 1
-//#define VERSOSE 0
+#define VERBOSE
+#define VERSION "0.1"
 
-// The remote service we wish to connect to.
-static BLEUUID serviceUUID("8aaeec2c-7f43-11ee-b962-0242ac120002");
-// The characteristic of the remote service we are interested in.
-
-static BLEUUID    charBatteryVoltageUUID("8aaeee98-7f43-11ee-b962-0242ac120002");
-static BLEUUID    charTempUUID("8aaeefba-7f43-11ee-b962-0242ac120002");
-static BLEUUID    charPressureFwd("8aaef0c8-7f43-11ee-b962-0242ac120002");
-static BLEUUID    charPressure45("8aaef244-7f43-11ee-b962-0242ac120002");
-
-static boolean doConnect = false;
-static boolean connected = false;
-static boolean doScan = false;
-static BLERemoteCharacteristic* pRemoteCharacteristic;
-static BLEAdvertisedDevice* myDevice;
-
-uint32_t value = 0;
-int led = LED_BUILTIN;
-uint8_t iLoop = 0;
-uint32_t uPressure1NoLoad, uPressure2NoLoad;
-
-#define SERVICE_UUID "8aaeec2c-7f43-11ee-b962-0242ac120002"
-
-// update pressure 50 times per second
-
-
+#ifdef VERBOSE
+  #define SERIAL_BEGIN(x) Serial.begin(x)
+  #define SERIAL_PRINTLN(x) Serial.println(x)
+  #define SERIAL_PRINT(x) Serial.print(x)
+#else
+  #define SERIAL_BEGIN(x)
+  #define SERIAL_PRINTLN(x)
+  #define SERIAL_PRINT(x)
+#endif
 
 //Pins
+#define BUTTONAPIN A8
+#define BUTTONBPIN A7
+#define BUTTONCPIN A6
+#define NEOPIXELDATAPIN A5
 #define VBATPIN A13
-#define VPRESSURE1PIN A2
-#define VPRESSURE2PIN A3
+#define WIRE Wire
+
+//
+#define LED_COUNT 8
+//portrait 0|2  landscape 1|3
+#define LANDSCAPE 0
+#define PORTRAIT 1
+//max milliseconds for data to age before determined to be invalid
+#define MAX_CRITICAL_DELAY 500
+#define MAX_NONCRITICAL_DELAY 10000
+//types of blink speeds
+#define FAST 250
+#define NORMAL 1000
+#define SLOW 2000
+//colors
+#define RED 255, 0, 0
+#define ORANGE 255, 165, 0
+#define YELLOW 255, 255, 0
+#define GREEN 0, 255, 0
+#define BLUE 0, 0, 255
+#define INDIGO 75, 0, 130
+#define VIOLET 148, 0, 211
+#define WHITE 255,255,255
+#define TRUE_WHITE 0, 0, 0, 255
+#define OFF   0, 0, 0, 0
+
+//structure to collect data from BLE and keep track of how old it is.
+struct Data {
+  u_int32_t uVal;
+  unsigned long uLastMillis;
+};
+
+////////////////////////////////////////////////////
+//  GLOBALS
+////////////////////////////////////////////////////
+Adafruit_SSD1306 g_display = Adafruit_SSD1306(128, 32, &WIRE);
+Adafruit_NeoPixel g_strip(LED_COUNT, NEOPIXELDATAPIN, NEO_GRBW + NEO_KHZ800);
+
+uint8_t guBrightness = 50; // Init brightness to 2/5 
+
+////////////////////////////////////////////////////
+//  TODO
+////////////////////////////////////////////////////
+/*
+  - add provision for ensuring that probe has not reset after motion has started.  maybe way to check
+      is to track zero pressure in EEPROM in the probe and not send if too large from last stored value.
+      Also calculating airspeed and showing is good cross check.
+  - add provision for adjusting AoA for flaps positions
+*/
+
+////////////////////////////////////////////////////
+//  General Functions
+////////////////////////////////////////////////////
+bool isBlinkOn( unsigned long uCurMillis, u_int8_t uSpeed = NORMAL){
+// Function to regulate the speed of a blinking LED
+  // Calculate the time period for one cycle of the blinking based on the blink speed
+  unsigned long uPeriod = 1000 / uSpeed;
+
+  // Calculate the time elapsed since the last change of state
+  unsigned long uElapsedTime = uCurMillis % uPeriod;
+
+  // Determine if the LED should be lit or unlit based on the elapsed time
+  return (uElapsedTime < uPeriod / 2);
+}
+
+////////////////////////////////////////////////////
+//  DEBUG Functions
+////////////////////////////////////////////////////
 
 void PrintPinVolts(uint uPin, float fVolts){
-  Serial.print("Pin:");
-  Serial.print(uPin);
-  Serial.print(" ");
-  Serial.print(fVolts);
-  Serial.println(" mVolts");
+  SERIAL_PRINT("Pin:");
+  SERIAL_PRINT(uPin);
+  SERIAL_PRINT(" ");
+  SERIAL_PRINT(fVolts);
+  SERIAL_PRINTLN(" mVolts");
 };
 
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-    };
 
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-    }
+////////////////////////////////////////////////////
+//  Data Functions
+////////////////////////////////////////////////////
+bool isValid(struct Data *pData, unsigned long uCurMillis, unsigned long uMaxAge = MAX_CRITICAL_DELAY){
+  if ( (uCurMillis-pData->uLastMillis) > uMaxAge ){
+    return false;
+  }else{
+    return true;
+  };
 };
 
+String toDisplay(){
+  // TODO: function to make data ready for display i.e. limit number of characters
+  //  and if too old replace with a dash or other character
+};
+
+String toStr(){
+  // TODO: function to make data ready for output to csv
+};
+
+////////////////////////////////////////////////////
+//  Analog Data Functions
+////////////////////////////////////////////////////
 uint32_t getAnalogData(uint uPin) {
   float fMeasuredV = analogReadMilliVolts(uPin);
-  if (VERBOSE){PrintPinVolts(uPin,fMeasuredV);};
+  #ifdef VERBOSE
+  PrintPinVolts(uPin,fMeasuredV);
+  #endif
   return (uint32_t(round(fMeasuredV)));
 };
 
@@ -80,176 +148,135 @@ uint32_t getVoltage() {
   return (uVolts);
 };
 
+
+////////////////////////////////////////////////////
+//  Get Environmental Functions
+////////////////////////////////////////////////////
 uint32_t getTemperature() {
-  //placeholder for future capabilities to get temperature.
+  //TODO: placeholder for future capabilities to get temperature.
   return (0);
 };
 
-void initPressureNoLoads(){
-  //get Pressure Voltage at start-up, which we will assume happens at air speed of zero.
-  delay(500);
-  uPressure1NoLoad = getPressureNoLoad(VPRESSURE1PIN);
-  uPressure2NoLoad = getPressureNoLoad(VPRESSURE2PIN);
-  Serial.print("P1 NoLoad:");
-  Serial.println(uPressure1NoLoad);
-  Serial.print("P2 NoLoad:");
-  Serial.println(uPressure2NoLoad);
-};
-
-uint32_t getPressureNoLoad(uint uPin){
-  //  take average over a bit of time
-  uint32_t uSum=0;
-  int i;
-  #define POINTS 5
-  for (i = 0; i < POINTS; i++){
-    uSum += getAnalogData(uPin);
-    if(VERBOSE){Serial.println(uSum);};
-    delay(200);
-  };
-  return (uSum/POINTS);
-};
-
-
-
-static void notifyCallback(
-  BLERemoteCharacteristic* pBLERemoteCharacteristic,
-  uint8_t* pData,
-  size_t length,
-  bool isNotify) {
-    Serial.print("Notify callback for characteristic ");
-    Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
-    Serial.print(" of data length ");
-    Serial.println(length);
-    Serial.print("data: ");
-    Serial.write(pData, length);
-    Serial.println();
+void initEnvironmental(){
+  //TODO: init environmental module
 }
 
-class MyClientCallback : public BLEClientCallbacks {
-  void onConnect(BLEClient* pclient) {
-  }
-
-  void onDisconnect(BLEClient* pclient) {
-    connected = false;
-    Serial.println("onDisconnect");
-  }
-};
-
-bool connectToServer() {
-    Serial.print("Forming a connection to ");
-    Serial.println(myDevice->getAddress().toString().c_str());
-    
-    BLEClient*  pClient  = BLEDevice::createClient();
-    Serial.println(" - Created client");
-
-    pClient->setClientCallbacks(new MyClientCallback());
-
-    // Connect to the remove BLE Server.
-    pClient->connect(myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
-    Serial.println(" - Connected to server");
-    pClient->setMTU(517); //set client to request maximum MTU from server (default is 23 otherwise)
-  
-    // Obtain a reference to the service we are after in the remote BLE server.
-    BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
-    if (pRemoteService == nullptr) {
-      Serial.print("Failed to find our service UUID: ");
-      Serial.println(serviceUUID.toString().c_str());
-      pClient->disconnect();
-      return false;
-    }
-    Serial.println(" - Found our service");
+////////////////////////////////////////////////////
+//  EEPROM Functions
+////////////////////////////////////////////////////
 
 
-    // Obtain a reference to the characteristic in the service of the remote BLE server.
-    pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
-    if (pRemoteCharacteristic == nullptr) {
-      Serial.print("Failed to find our characteristic UUID: ");
-      Serial.println(charUUID.toString().c_str());
-      pClient->disconnect();
-      return false;
-    }
-    Serial.println(" - Found our characteristic");
+////////////////////////////////////////////////////
+//  OLED Display Functions
+////////////////////////////////////////////////////
+void showLogo() {
+  g_display.setRotation(LANDSCAPE);
 
-    // Read the value of the characteristic.
-    if(pRemoteCharacteristic->canRead()) {
-      String value = pRemoteCharacteristic->readValue();
-      Serial.print("The characteristic value was: ");
-      Serial.println(value.c_str());
-    }
+  g_display.clearDisplay();
 
-    if(pRemoteCharacteristic->canNotify())
-      pRemoteCharacteristic->registerForNotify(notifyCallback);
+  // Set text color, size, and location for "ArduAoA" in large font
 
-    connected = true;
-    return true;
+  g_display.setFont(&FreeSans12pt7b);
+  g_display.setTextSize(1);
+  g_display.setCursor(30, 20);
+  g_display.print(F("ArduAoA"));
+
+  g_display.setRotation(PORTRAIT);
+
+  // Set text color, size, and location for "v1.0" in small font
+  g_display.setFont(NULL);
+  g_display.setTextSize(1);
+  g_display.setCursor(0, 120);
+  g_display.print(F("v" VERSION));
+
+  // Display the changes
+  g_display.display();
 }
-/**
- * Scan for BLE servers and find the first one that advertises the service we are looking for.
- */
-class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
- /**
-   * Called for each advertising BLE server.
-   */
-  void onResult(BLEAdvertisedDevice advertisedDevice) {
-    Serial.print("BLE Advertised Device found: ");
-    Serial.println(advertisedDevice.toString().c_str());
 
-    // We have found a device, let us now see if it contains the service we are looking for.
-    if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
+void initDisplay(){
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  g_display.begin(SSD1306_SWITCHCAPVCC, 0x3C); // Address 0x3C for 128x32
+  g_display.setTextColor(SSD1306_WHITE);
 
-      BLEDevice::getScan()->stop();
-      myDevice = new BLEAdvertisedDevice(advertisedDevice);
-      doConnect = true;
-      doScan = true;
+  //TODO set dimness
 
-    } // Found our server
-  } // onResult
-}; // MyAdvertisedDeviceCallbacks
+  showLogo();
+
+  // Show image buffer on the display hardware.
+  g_display.display();
+}
 
 
+////////////////////////////////////////////////////
+//  LED Strip Functions
+////////////////////////////////////////////////////
+
+// Fill strip pixels one after another with a color. Strip is NOT cleared
+// first; anything there will be covered pixel by pixel. Pass in color
+// (as a single 'packed' 32-bit value, which you can get by calling
+// strip.Color(red, green, blue) as shown in the loop() function above),
+// and a delay time (in milliseconds) between pixels.
+void colorWipe(uint32_t color, int wait) {
+  for(int i=0; i<g_strip.numPixels(); i++) { // For each pixel in strip...
+    g_strip.setPixelColor(i, color);         //  Set pixel's color (in RAM)
+    g_strip.show();                          //  Update strip to match
+    delay(wait);                           //  Pause for a moment
+  }
+}
+
+void initStrip(){
+  g_strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
+  g_strip.show();            // Turn OFF all pixels ASAP
+  g_strip.setBrightness(guBrightness);
+
+  colorWipe(g_strip.Color(RED), 50); 
+  colorWipe(g_strip.Color(ORANGE), 50); 
+  colorWipe(g_strip.Color(YELLOW), 50); 
+  colorWipe(g_strip.Color(GREEN), 50); 
+  colorWipe(g_strip.Color(BLUE), 50); 
+  colorWipe(g_strip.Color(INDIGO), 50); 
+  colorWipe(g_strip.Color(VIOLET), 50); 
+  colorWipe(g_strip.Color(WHITE), 50); 
+  colorWipe(g_strip.Color(TRUE_WHITE), 50); 
+  colorWipe(g_strip.Color(OFF), 50); 
+}
+
+
+////////////////////////////////////////////////////
+//  BLE Receiver Functions
+////////////////////////////////////////////////////
+void initBLE(){
+  //TODO: add ble initialization
+}
+
+
+////////////////////////////////////////////////////
+//  MAIN Routine Functions
+////////////////////////////////////////////////////
 void setup() {
-  Serial.begin(115200);
-  Serial.println("Starting Arduino BLE Client application...");
-  BLEDevice::init("");
+  SERIAL_BEGIN(115200);
+  SERIAL_PRINTLN("ArduAOA Probe v" VERSION);
 
-  // Retrieve a Scanner and set the callback we want to use to be informed when we
-  // have detected a new device.  Specify that we want active scanning and start the
-  // scan to run for 5 seconds.
-  BLEScan* pBLEScan = BLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-  pBLEScan->setInterval(1349);
-  pBLEScan->setWindow(449);
-  pBLEScan->setActiveScan(true);
-  pBLEScan->start(5, false);
+  initDisplay();
+  initEnvironmental();
+  initStrip();
+  initBLE();
+
+  g_display.clearDisplay();
+  g_display.display();
+  SERIAL_PRINTLN("Setup complete");
 } // End of setup.
 
 
 // This is the Arduino main loop function.
 void loop() {
+  // get BLE data
 
-  // If the flag "doConnect" is true then we have scanned for and found the desired
-  // BLE Server with which we wish to connect.  Now we connect to it.  Once we are 
-  // connected we set the connected flag to be true.
-  if (doConnect == true) {
-    if (connectToServer()) {
-      Serial.println("We are now connected to the BLE Server.");
-    } else {
-      Serial.println("We have failed to connect to the server; there is nothin more we will do.");
-    }
-    doConnect = false;
-  }
+  // get local data
 
-  // If we are connected to a peer BLE Server, update the characteristic each time we are reached
-  // with the current time since boot.
-  if (connected) {
-    String newValue = "Time since boot: " + String(millis()/1000);
-    Serial.println("Setting new characteristic value to \"" + newValue + "\"");
-    
-    // Set the characteristic's value to be the array of bytes that is actually a string.
-    pRemoteCharacteristic->writeValue(newValue.c_str(), newValue.length());
-  }else if(doScan){
-    BLEDevice::getScan()->start(0);  // this is just example to start scan after disconnect, most likely there is better way to do it in arduino
-  }
-  
-  delay(1000); // Delay a second between loops.
+  // do calculations
+
+  // update display
+
+  // write data to serial
 } // End of loop
