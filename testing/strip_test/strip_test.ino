@@ -83,16 +83,13 @@ uint8_t guBrightness = 8; // Init brightness to 2/5
 ////////////////////////////////////////////////////
 //  General Functions
 ////////////////////////////////////////////////////
-bool isBlinkOn( unsigned long uCurMillis, u_int8_t uSpeed = NORMAL){
+bool isBlinkOn( unsigned long uCurMillis, u_int16_t uSpeed = NORMAL){
 // Function to regulate the speed of a blinking LED
-  // Calculate the time period for one cycle of the blinking based on the blink speed
-  unsigned long uPeriod = 1000 / uSpeed;
-
   // Calculate the time elapsed since the last change of state
-  unsigned long uElapsedTime = uCurMillis % uPeriod;
+  unsigned long uElapsedTime = uCurMillis % uSpeed;
 
   // Determine if the LED should be lit or unlit based on the elapsed time
-  return (uElapsedTime < uPeriod / 2);
+  return (uElapsedTime < uSpeed / 2);
 }
 
 
@@ -200,23 +197,24 @@ void setup() {
   for (i = 0; i < 25; i++){
     g_strip.setBrightness(i);
     stripAoAtest();
-    delay(100);
+    delay(10);
   }
   //cycle brightness levels.  {1,3,5,8,25} appears to be good range
   for (i = 0; i < 5; i++) {
     g_strip.setBrightness(auBrightness[i]);
     stripAoAtest();
-    delay(500);
+    delay(100);
   }
 
-  g_strip.setBrightness(8);
-  for (i = 0; i < 256; i=i+25){
-    for (j = 0; j < 256; j=j+25){
-      for (k = 0; k < 256; k=k+25){
-        stripColor(i,j,k);
-      }
-    }
-  }
+  //cycle colors (sort of)
+  // g_strip.setBrightness(8);
+  // for (i = 0; i < 256; i=i+25){
+  //   for (j = 0; j < 256; j=j+25){
+  //     for (k = 0; k < 256; k=k+25){
+  //       stripColor(i,j,k);
+  //     }
+  //   }
+  // }
 
   stripAoAtest();
 
@@ -226,11 +224,31 @@ void setup() {
 
 // This is the Arduino main loop function.
 void loop() {
-  int i, j, k;
+  unsigned long uMillis;
 
-  
+  uMillis = millis();
 
+  if (isBlinkOn(uMillis, FAST)){
+    g_strip.setPixelColor(7, RED);
+  } 
+  else {
+    g_strip.setPixelColor(7, OFF);
+  }
 
+  if (isBlinkOn(uMillis,NORMAL)){
+    g_strip.setPixelColor(4, BLUE);
+  } 
+  else {
+    g_strip.setPixelColor(4, OFF);
+  }
 
+  if (isBlinkOn(uMillis,SLOW)){
+    g_strip.setPixelColor(0, GREEN);
+  } 
+  else {
+    g_strip.setPixelColor(0, OFF);
+  }
+
+  g_strip.show();
 
 } // End of loop
